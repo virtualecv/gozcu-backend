@@ -4,18 +4,19 @@ const https = require('https');
 const { Server } = require('socket.io');
 
 const app = express();
-
-// Web arayüzünü (Haritayı) herkese açmak için eklediğimiz satır:
-app.use(express.static(__dirname + '/public'));
-
-const server = http.createServer(app);
-const io = new Server(server, {
+const server = http.createServer(app); // 1. Önce temel HTTP sunucusunu oluştur
+const io = new Server(server, {        // 2. Socket.io'yu bu sunucuya bağla
     cors: { origin: "*", methods: ["GET", "POST"] }
 });
+
+// 3. KRİTİK SIRALAMA: Statik dosyaları sunma emri io tanımlandıktan SONRA gelmeli
+// Bu sayede /socket.io/socket.io.js dosyası çakışmadan servis edilebilir.
+app.use(express.static(__dirname + '/public'));
 
 const nesneler = [];
 const MAX_NESNE = 100;
 
+// OSM Verisi Çekme Endpoint'i
 app.get('/osm-verisi', async (req, res) => {
     const { lat, lng, yari_cap = 200 } = req.query;
     if (!lat || !lng) return res.status(400).json({ error: 'lat/lng gerekli' });
@@ -52,6 +53,7 @@ app.get('/osm-verisi', async (req, res) => {
     });
 });
 
+// Socket.io Olayları
 io.on('connection', (socket) => {
     console.log('Yeni bağlantı:', socket.id);
     socket.emit('nesne_listesi', nesneler);
@@ -86,6 +88,7 @@ io.on('connection', (socket) => {
     });
 });
 
+// Railway Port Ayarı
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, '0.0.0.0', () => {
     console.log(`GÖZCÜ SUNUCU AKTİF PORT: ${PORT}`);
