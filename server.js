@@ -82,7 +82,7 @@ io.on('connection', (socket) => {
     });
 });
 
-const PORT = 3000;
+const PORT = process.env.PORT || 3000;
 server.listen(PORT, '0.0.0.0', () => {
     console.log(`GÖZCÜ SUNUCU AKTİF: http://192.168.137.1:${PORT}`);
 });
