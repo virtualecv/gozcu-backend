@@ -356,7 +356,7 @@ function kameraPanelAc() { document.getElementById('kamera-panel').style.display
 function kameraPanelKapat() { document.getElementById('kamera-panel').style.display = 'none'; kameraPanelAcik = false; }
 
 // Socket bağlantısı - IP: 192.168.137.1
-const socket = io('https://gozcu-backend-production.up.railway.app');
+const socket = io();
 
 socket.on('connect', () => {
     document.getElementById('conn-status').textContent = 'AKTİF';
