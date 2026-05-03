@@ -1,0 +1,758 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <title>Aero-Nav | Gözcü Komuta Merkezi</title>
+    <script src="https://api.mapbox.com/mapbox-gl-js/v2.14.1/mapbox-gl.js"></script>
+    <link href="https://api.mapbox.com/mapbox-gl-js/v2.14.1/mapbox-gl.css" rel="stylesheet" />
+    <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { background: #000; color: #0f0; font-family: 'Courier New', monospace; overflow: hidden; }
+        #map { position: absolute; top: 0; bottom: 0; width: 100%; }
+        #overlay {
+            position: absolute; top: 20px; left: 20px; z-index: 1;
+            background: rgba(0,0,0,0.85); padding: 15px 20px;
+            border: 1px solid #0f0; min-width: 220px;
+        }
+        .label { color: #555; font-size: 11px; text-transform: uppercase; margin-top: 10px; }
+        .value { color: #0f0; font-size: 16px; font-weight: bold; }
+        .aktif { color: #0f0; }
+        .pasif { color: red; animation: blinker 1s linear infinite; }
+        @keyframes blinker { 50% { opacity: 0; } }
+        #engel-bar {
+            position: absolute; bottom: 30px; left: 50%;
+            transform: translateX(-50%);
+            background: rgba(0,0,0,0.85); border: 1px solid #ffaa00;
+            padding: 12px 32px; font-size: 20px; font-weight: bold;
+            z-index: 10; min-width: 320px; text-align: center; display: none;
+            border-radius: 8px;
+        }
+        .tehlike { color: #ff3300; border-color: #ff3300 !important; }
+        .dikkat { color: #ffaa00; }
+        .nesne-marker { display: flex; flex-direction: column; align-items: center; pointer-events: none; }
+        .nesne-ikon { font-size: 28px; transition: transform 0.3s ease; }
+        .nesne-label {
+            background: rgba(0,0,0,0.8); color: #ffaa00;
+            font-size: 10px; padding: 2px 6px; border-radius: 4px;
+            border: 1px solid #ffaa00; white-space: nowrap; margin-top: 2px;
+        }
+        .nesne-label.tehlikeli { color: #ff3300; border-color: #ff3300; }
+        @keyframes walkAnim {
+            0%, 100% { transform: translateY(0px) rotate(-5deg); }
+            50% { transform: translateY(-4px) rotate(5deg); }
+        }
+        @keyframes driveAnim {
+            0%, 100% { transform: translateX(0px); }
+            50% { transform: translateX(3px); }
+        }
+        @keyframes pulseAnim {
+            0%, 100% { transform: scale(1); opacity: 1; }
+            50% { transform: scale(1.2); opacity: 0.8; }
+        }
+        @keyframes staticAnim { 0%, 100% { transform: scale(1); } }
+
+        #kamera-panel {
+            position: absolute; top: 20px; right: 20px;
+            width: 340px; background: rgba(0,0,0,0.92);
+            border: 1px solid #0f0; border-radius: 8px;
+            z-index: 10; display: none; flex-direction: column; overflow: hidden;
+        }
+        #kamera-panel-baslik {
+            padding: 10px 14px; border-bottom: 1px solid #0f0;
+            font-size: 12px; color: #0f0;
+            display: flex; justify-content: space-between; align-items: center;
+        }
+        #kamera-kapat {
+            cursor: pointer; background: none; border: none;
+            color: #ff3300; font-size: 18px; font-weight: bold;
+        }
+        #kamera-canvas { width: 340px; height: 340px; display: block; }
+        #kamera-bilgi { padding: 6px 14px; font-size: 11px; color: #555; border-top: 1px solid #222; }
+        #kamera-tespit-listesi { padding: 4px 14px 10px; font-size: 12px; max-height: 100px; overflow-y: auto; }
+        .tespit-satir {
+            display: flex; justify-content: space-between;
+            padding: 2px 0; border-bottom: 1px solid #111; color: #0f0;
+        }
+        .tespit-satir.tehlikeli { color: #ff3300; }
+
+        #rota-panel {
+            position: absolute; bottom: 80px; left: 20px;
+            z-index: 10; background: rgba(0,0,0,0.92);
+            border: 1px solid #0f0; border-radius: 8px;
+            padding: 12px; width: 260px;
+        }
+        #rota-input {
+            width: 100%; background: #111; border: 1px solid #0f0;
+            color: #0f0; font-family: monospace; font-size: 12px;
+            padding: 6px 8px; border-radius: 4px; outline: none;
+            box-sizing: border-box;
+        }
+        #rota-input::placeholder { color: #333; }
+        #rota-butonlar { display: flex; gap: 6px; margin-top: 8px; }
+        .rota-btn {
+            flex: 1; background: rgba(0,255,0,0.1); border: 1px solid #0f0;
+            color: #0f0; font-family: monospace; font-size: 11px;
+            padding: 5px; border-radius: 4px; cursor: pointer;
+        }
+        .rota-btn:hover { background: rgba(0,255,0,0.25); }
+        .rota-btn.iptal { border-color: #ff3300; color: #ff3300; background: rgba(255,51,0,0.1); }
+        #rota-bilgi {
+            margin-top: 8px; font-size: 11px; color: #555;
+            border-top: 1px solid #222; padding-top: 6px; display: none;
+        }
+        #rota-adim {
+            margin-top: 6px; font-size: 12px; color: #0f0; font-weight: bold;
+        }
+        #harita-tikla-bilgi {
+            font-size: 10px; color: #333; margin-top: 4px;
+        }
+    </style>
+</head>
+<body>
+
+<div id="overlay">
+    <div class="label">Sistem Durumu</div>
+    <div class="value"><span id="conn-status" class="pasif">BAĞLANTI YOK</span></div>
+    <div class="label">Konum</div>
+    <div class="value" id="coords">Bekleniyor...</div>
+    <div class="label">Son Mesafe</div>
+    <div class="value" id="mesafe">— cm</div>
+    <div class="label">Son Tespit</div>
+    <div class="value" id="son-nesne">—</div>
+    <div class="label">Toplam Tespit</div>
+    <div class="value" id="tespit-sayisi">0</div>
+    <div style="margin-top:12px;font-size:10px;color:#333">İkona tıkla → canlı kamera</div>
+</div>
+
+<div id="kamera-panel">
+    <div id="kamera-panel-baslik">
+        <span>CANLI KAMERA — YOLOv8</span>
+        <button id="kamera-kapat" onclick="kameraPanelKapat()">✕</button>
+    </div>
+    <canvas id="kamera-canvas" width="320" height="320"></canvas>
+    <div id="kamera-bilgi">Son güncelleme: <span id="kamera-zaman">—</span></div>
+    <div id="kamera-tespit-listesi"></div>
+</div>
+
+<div id="engel-bar">—</div>
+
+<div id="rota-panel">
+    <div style="font-size:11px;color:#555;margin-bottom:6px">🗺️ ROTA MODU</div>
+    <input id="rota-input" type="text" placeholder="Hedef adres girin..." />
+    <div id="harita-tikla-bilgi">veya haritaya tıklayarak hedef seçin</div>
+    <div id="rota-butonlar">
+        <button class="rota-btn" onclick="rotaBaslat()">▶ Başlat</button>
+        <button class="rota-btn iptal" onclick="rotaIptal()">✕ İptal</button>
+    </div>
+    <div id="rota-bilgi">
+        <span id="rota-mesafe">—</span> · <span id="rota-sure">—</span>
+        <div id="rota-adim">Rota bekleniyor...</div>
+    </div>
+</div>
+
+<div id="map"></div>
+
+<script>
+mapboxgl.accessToken = 'pk.eyJ1IjoiZWZlY2V2aWsiLCJhIjoiY21uMGZyczc0MGk4cjJwczI5YzNpZ3NkciJ9.MPWdQEmd4pQEDJmIqBDi1Q';
+
+const map = new mapboxgl.Map({
+    container: 'map',
+    style: 'mapbox://styles/mapbox/navigation-night-v1',
+    center: [36.9014, 37.0662],
+    zoom: 17, pitch: 65, bearing: -20, antialias: true
+});
+
+const NESNE_DB = {
+    'person':           { emoji: '🚶', anim: 'walkAnim',   renk: '#ff6600', hiz: 1.4, tehlike: true },
+    'car':              { emoji: '🚗', anim: 'driveAnim',  renk: '#ff3300', hiz: 0.6, tehlike: true },
+    'truck':            { emoji: '🚛', anim: 'driveAnim',  renk: '#ff3300', hiz: 0.8, tehlike: true },
+    'bus':              { emoji: '🚌', anim: 'driveAnim',  renk: '#ff3300', hiz: 0.8, tehlike: true },
+    'motorcycle':       { emoji: '🏍️', anim: 'driveAnim', renk: '#ff6600', hiz: 0.5, tehlike: true },
+    'bicycle':          { emoji: '🚲', anim: 'driveAnim',  renk: '#ffaa00', hiz: 1.0, tehlike: false },
+    'train':            { emoji: '🚆', anim: 'driveAnim',  renk: '#ff3300', hiz: 0.4, tehlike: true },
+    'boat':             { emoji: '⛵', anim: 'driveAnim',  renk: '#4488ff', hiz: 0.8, tehlike: false },
+    'traffic light':    { emoji: '🚦', anim: 'pulseAnim',  renk: '#ffff00', hiz: 2.0, tehlike: false },
+    'stop sign':        { emoji: '🛑', anim: 'staticAnim', renk: '#ff0000', hiz: 999, tehlike: false },
+    'fire hydrant':     { emoji: '🚒', anim: 'staticAnim', renk: '#ff4400', hiz: 999, tehlike: false },
+    'parking meter':    { emoji: '🅿️', anim: 'staticAnim', renk: '#aaaaaa', hiz: 999, tehlike: false },
+    'bird':             { emoji: '🐦', anim: 'walkAnim',   renk: '#88cc88', hiz: 1.2, tehlike: false },
+    'cat':              { emoji: '🐱', anim: 'walkAnim',   renk: '#ffaa44', hiz: 1.5, tehlike: false },
+    'dog':              { emoji: '🐕', anim: 'walkAnim',   renk: '#ffaa44', hiz: 1.3, tehlike: false },
+    'horse':            { emoji: '🐎', anim: 'walkAnim',   renk: '#aa7744', hiz: 0.9, tehlike: false },
+    'sheep':            { emoji: '🐑', anim: 'walkAnim',   renk: '#ffffff', hiz: 1.6, tehlike: false },
+    'cow':              { emoji: '🐄', anim: 'walkAnim',   renk: '#ffffff', hiz: 1.4, tehlike: false },
+    'elephant':         { emoji: '🐘', anim: 'walkAnim',   renk: '#888888', hiz: 1.2, tehlike: true },
+    'bear':             { emoji: '🐻', anim: 'walkAnim',   renk: '#884422', hiz: 1.0, tehlike: true },
+    'zebra':            { emoji: '🦓', anim: 'walkAnim',   renk: '#ffffff', hiz: 0.9, tehlike: false },
+    'giraffe':          { emoji: '🦒', anim: 'walkAnim',   renk: '#ffcc44', hiz: 1.1, tehlike: false },
+    'bench':            { emoji: '🪑', anim: 'staticAnim', renk: '#888844', hiz: 999, tehlike: false },
+    'backpack':         { emoji: '🎒', anim: 'walkAnim',   renk: '#888888', hiz: 1.4, tehlike: false },
+    'umbrella':         { emoji: '☂️', anim: 'walkAnim',  renk: '#4488ff', hiz: 1.4, tehlike: false },
+    'handbag':          { emoji: '👜', anim: 'walkAnim',   renk: '#aa6644', hiz: 1.4, tehlike: false },
+    'suitcase':         { emoji: '🧳', anim: 'walkAnim',   renk: '#888888', hiz: 1.3, tehlike: false },
+    'chair':            { emoji: '🪑', anim: 'staticAnim', renk: '#888844', hiz: 999, tehlike: false },
+    'bottle':           { emoji: '🍶', anim: 'staticAnim', renk: '#4488ff', hiz: 999, tehlike: false },
+    'cup':              { emoji: '☕', anim: 'staticAnim', renk: '#aa6622', hiz: 999, tehlike: false },
+    'tv':               { emoji: '📺', anim: 'staticAnim', renk: '#4444ff', hiz: 999, tehlike: false },
+    'laptop':           { emoji: '💻', anim: 'staticAnim', renk: '#888888', hiz: 999, tehlike: false },
+    'cell phone':       { emoji: '📱', anim: 'staticAnim', renk: '#888888', hiz: 999, tehlike: false },
+    'clock':            { emoji: '🕐', anim: 'pulseAnim',  renk: '#ffaa00', hiz: 3.0, tehlike: false },
+    'book':             { emoji: '📚', anim: 'staticAnim', renk: '#aa4422', hiz: 999, tehlike: false },
+    'crosswalk':        { emoji: '🚸', anim: 'pulseAnim',  renk: '#ffffff', hiz: 2.0, tehlike: false },
+    'traffic cones':    { emoji: '🔺', anim: 'staticAnim', renk: '#ff6600', hiz: 999, tehlike: false },
+    'tactile paving':   { emoji: '⬛', anim: 'staticAnim', renk: '#ffff00', hiz: 999, tehlike: false },
+    'caution wet floor':{ emoji: '⚠️', anim: 'pulseAnim', renk: '#ffff00', hiz: 2.0, tehlike: false },
+    'disability sign':  { emoji: '♿', anim: 'staticAnim', renk: '#4488ff', hiz: 999, tehlike: false },
+    'pedestrian signs': { emoji: '🚶', anim: 'staticAnim', renk: '#4488ff', hiz: 999, tehlike: false },
+    'red man':          { emoji: '🚷', anim: 'pulseAnim',  renk: '#ff3300', hiz: 1.5, tehlike: true },
+    'bus bell':         { emoji: '🔔', anim: 'pulseAnim',  renk: '#ffaa00', hiz: 1.5, tehlike: false },
+    'bicycle sign':     { emoji: '🚲', anim: 'staticAnim', renk: '#4488ff', hiz: 999, tehlike: false },
+    'MRT':              { emoji: '🚇', anim: 'driveAnim',  renk: '#4488ff', hiz: 0.5, tehlike: false },
+    'TRA':              { emoji: '🚌', anim: 'driveAnim',  renk: '#4488ff', hiz: 0.6, tehlike: false },
+};
+
+function getNesneConfig(nesne) {
+    const key = Object.keys(NESNE_DB).find(k =>
+        nesne.toLowerCase() === k.toLowerCase() ||
+        nesne.toLowerCase().includes(k.toLowerCase())
+    );
+    return NESNE_DB[key] || { emoji: '📍', anim: 'pulseAnim', renk: '#ffaa00', hiz: 2.0, tehlike: false };
+}
+
+function markerElementOlustur(nesne, mesafe) {
+    const config = getNesneConfig(nesne);
+    const el = document.createElement('div');
+    el.className = 'nesne-marker';
+
+    const ikon = document.createElement('div');
+    ikon.className = 'nesne-ikon';
+    ikon.textContent = config.emoji;
+    if (config.hiz !== 999) {
+        ikon.style.animation = `${config.anim} ${config.hiz}s ease-in-out infinite`;
+    }
+    ikon.style.filter = `drop-shadow(0 0 8px ${config.renk})`;
+
+    const label = document.createElement('div');
+    label.className = `nesne-label ${config.tehlike ? 'tehlikeli' : ''}`;
+    label.textContent = `${nesne}${mesafe > 0 ? ' · ' + mesafe + 'cm' : ''}`;
+
+    el.appendChild(ikon);
+    el.appendChild(label);
+    return el;
+}
+
+map.on('load', () => {
+    map.setFog({
+        color: 'rgb(10, 10, 20)',
+        'high-color': 'rgb(20, 20, 40)',
+        'horizon-blend': 0.1,
+        'space-color': 'rgb(0, 0, 10)',
+        'star-intensity': 0.8
+    });
+
+    map.addLayer({
+        id: '3d-buildings',
+        source: 'composite',
+        'source-layer': 'building',
+        filter: ['==', 'extrude', 'true'],
+        type: 'fill-extrusion',
+        minzoom: 14,
+        paint: {
+            'fill-extrusion-color': [
+                'interpolate', ['linear'], ['get', 'height'],
+                0,   '#0a0a1a',
+                10,  '#0d1a2e',
+                20,  '#112244',
+                50,  '#1a3366',
+                100, '#224488',
+                200, '#2255aa'
+            ],
+            'fill-extrusion-height': ['get', 'height'],
+            'fill-extrusion-base': ['get', 'min_height'],
+            'fill-extrusion-opacity': 0.95,
+            'fill-extrusion-ambient-occlusion-intensity': 0.5,
+            'fill-extrusion-ambient-occlusion-radius': 3.0
+        }
+    });
+});
+
+const markerEl = document.createElement('div');
+markerEl.style.cssText = `
+    width: 0; height: 0;
+    border-left: 12px solid transparent;
+    border-right: 12px solid transparent;
+    border-bottom: 32px solid #00ff88;
+    filter: drop-shadow(0 0 8px #00ff88);
+`;
+const markerWrapper = document.createElement('div');
+markerWrapper.style.cssText = `
+    width: 40px; height: 44px;
+    display: flex; align-items: center; justify-content: center;
+    cursor: pointer;
+`;
+markerWrapper.appendChild(markerEl);
+markerWrapper.addEventListener('click', () => {
+    kameraPanelAcik ? kameraPanelKapat() : kameraPanelAc();
+});
+
+const kullaniciMarker = new mapboxgl.Marker({ element: markerWrapper, anchor: 'center' })
+    .setLngLat([36.9014, 37.0662])
+    .addTo(map);
+
+const nesneMarkerlar = new Map();
+let tespitSayisi = 0;
+
+function lerp(a, b, t) { return a + (b - a) * t; }
+
+function nesneEkleVeyaGuncelle(data) {
+    if (!data.lat || !data.lng || !data.nesne) return;
+
+    const lat = parseFloat(data.lat);
+    const lng = parseFloat(data.lng);
+    const nesne = data.nesne;
+    const mesafe = data.mesafe || 0;
+    const config = getNesneConfig(nesne);
+
+    let mevcutKey = null;
+    for (const [key, markerData] of nesneMarkerlar) {
+        if (key.startsWith(nesne + '_')) {
+            const dist = Math.abs(markerData.lat - lat) + Math.abs(markerData.lng - lng);
+            if (dist < 0.0005) { mevcutKey = key; break; }
+        }
+    }
+
+    if (mevcutKey && nesneMarkerlar.has(mevcutKey)) {
+        const existing = nesneMarkerlar.get(mevcutKey);
+        const marker = existing.marker;
+        let progress = 0;
+        const startLat = existing.lat;
+        const startLng = existing.lng;
+        const animInterval = setInterval(() => {
+            progress += 0.05;
+            if (progress >= 1) { progress = 1; clearInterval(animInterval); }
+            marker.setLngLat([lerp(startLng, lng, progress), lerp(startLat, lat, progress)]);
+        }, 16);
+        existing.lat = lat;
+        existing.lng = lng;
+        existing.zaman = Date.now();
+    } else {
+        const key = `${nesne}_${Date.now()}`;
+        const el = markerElementOlustur(nesne, mesafe);
+        const marker = new mapboxgl.Marker({ element: el, anchor: 'bottom' })
+            .setLngLat([lng, lat]).addTo(map);
+        nesneMarkerlar.set(key, { marker, lat, lng, zaman: Date.now() });
+        tespitSayisi++;
+        document.getElementById('tespit-sayisi').textContent = tespitSayisi;
+    }
+
+    for (const [key, d] of nesneMarkerlar) {
+        if (Date.now() - d.zaman > 30000) { d.marker.remove(); nesneMarkerlar.delete(key); }
+    }
+}
+
+let kameraPanelAcik = false;
+function kameraPanelAc() { document.getElementById('kamera-panel').style.display = 'flex'; kameraPanelAcik = true; }
+function kameraPanelKapat() { document.getElementById('kamera-panel').style.display = 'none'; kameraPanelAcik = false; }
+
+// Socket bağlantısı - IP: 192.168.137.1
+const socket = io('https://gozcu-backend-production.up.railway.app');
+
+socket.on('connect', () => {
+    document.getElementById('conn-status').textContent = 'AKTİF';
+    document.getElementById('conn-status').className = 'aktif';
+});
+
+socket.on('disconnect', () => {
+    document.getElementById('conn-status').textContent = 'BAĞLANTI YOK';
+    document.getElementById('conn-status').className = 'pasif';
+});
+
+socket.on('nesne_listesi', (liste) => { if(Array.isArray(liste)) liste.forEach(nesneEkleVeyaGuncelle); });
+
+socket.on('nesne_guncelle', (data) => {
+    nesneEkleVeyaGuncelle(data);
+    const config = getNesneConfig(data.nesne);
+    document.getElementById('son-nesne').textContent = `${config.emoji} ${data.nesne} (${data.mesafe}cm)`;
+});
+
+socket.on('harita_guncelle', (data) => {
+    const lng = parseFloat(data.lng);
+    const lat = parseFloat(data.lat);
+    const compass = parseFloat(data.compass) || 0;
+
+    sonLat = lat;
+    sonLng = lng;
+
+    kullaniciMarker.setLngLat([lng, lat]);
+    markerEl.style.transform = `rotate(${compass}deg)`;
+    map.easeTo({ center: [lng, lat], pitch: 65, duration: 200 });
+
+    document.getElementById('coords').textContent = `${lat.toFixed(5)}, ${lng.toFixed(5)}`;
+    document.getElementById('mesafe').textContent = `${data.mesafe} cm`;
+
+    // OSM verisi çek ve yakınlık kontrol et
+    osmVeriCek(lat, lng);
+    osmYakinlikKontrol(lat, lng);
+    rotaAdimKontrol(lat, lng);
+});
+
+// OSM verileri için değişkenler
+const osmMarkerlar = new Map();
+let sonOsmSorguLat = 0;
+let sonOsmSorguLng = 0;
+let sonOsmSorguZamani = 0;
+
+// OSM nesne konfigürasyonu
+const OSM_KONFIG = {
+    'crossing':        { emoji: '🚸', renk: '#ffffff', baslik: 'Yaya Geçidi' },
+    'lowered':         { emoji: '♿', renk: '#4488ff', baslik: 'Alçaltılmış Kaldırım' },
+    'tactile_paving':  { emoji: '⬛', renk: '#ffff00', baslik: 'Taktil Zemin' },
+    'bus_stop':        { emoji: '🚌', renk: '#00aaff', baslik: 'Otobüs Durağı' },
+    'bench':           { emoji: '🪑', renk: '#888844', baslik: 'Bank' },
+    'traffic_signals': { emoji: '🚦', renk: '#ffff00', baslik: 'Trafik Işığı' },
+    'raised':          { emoji: '⚠️', renk: '#ff6600', baslik: 'Yüksek Kaldırım' },
+};
+
+function osmTipBelirle(node) {
+    const t = node.tags || {};
+    if (t.highway === 'crossing') return 'crossing';
+    if (t.kerb === 'lowered') return 'lowered';
+    if (t.tactile_paving === 'yes') return 'tactile_paving';
+    if (t.highway === 'bus_stop') return 'bus_stop';
+    if (t.amenity === 'bench') return 'bench';
+    if (t.highway === 'traffic_signals') return 'traffic_signals';
+    if (t.kerb === 'raised') return 'raised';
+    return null;
+}
+
+function osmMarkerOlustur(tip) {
+    const konfig = OSM_KONFIG[tip];
+    const el = document.createElement('div');
+    el.style.cssText = `
+        display: flex; flex-direction: column; align-items: center;
+        pointer-events: all; cursor: pointer;
+    `;
+    el.innerHTML = `
+        <div style="font-size:22px;filter:drop-shadow(0 0 6px ${konfig.renk});opacity:0.85">${konfig.emoji}</div>
+        <div style="background:rgba(0,0,0,0.75);color:${konfig.renk};font-size:9px;
+                    padding:1px 5px;border-radius:3px;border:1px solid ${konfig.renk};
+                    white-space:nowrap;margin-top:1px;font-family:monospace">${konfig.baslik}</div>
+    `;
+    return el;
+}
+
+async function osmVeriCek(lat, lng) {
+    const suAn = Date.now();
+    // 30 saniyede bir ve 50 metreden fazla hareket edince sorgula
+    const mesafeFark = Math.abs(lat - sonOsmSorguLat) + Math.abs(lng - sonOsmSorguLng);
+    if (suAn - sonOsmSorguZamani < 30000 && mesafeFark < 0.0005) return;
+
+    sonOsmSorguLat = lat;
+    sonOsmSorguLng = lng;
+    sonOsmSorguZamani = suAn;
+
+    try {
+        const resp = await fetch(`http://192.168.137.1:3000/osm-verisi?lat=${lat}&lng=${lng}&yari_cap=200`);
+        const data = await resp.json();
+
+        if (!data.elements) return;
+
+        // Mevcut OSM markerları temizle
+        for (const [key, m] of osmMarkerlar) {
+            m.remove();
+            osmMarkerlar.delete(key);
+        }
+
+        // Yeni markerları ekle
+        data.elements.forEach(node => {
+            const tip = osmTipBelirle(node);
+            if (!tip) return;
+
+            const key = `osm_${node.id}`;
+            const el = osmMarkerOlustur(tip);
+            const konfig = OSM_KONFIG[tip];
+
+            const popup = new mapboxgl.Popup({ offset: 25, closeButton: false })
+                .setHTML(`
+                    <div style="background:#111;color:#0f0;padding:6px 10px;
+                                border:1px solid #0f0;border-radius:4px;font-family:monospace">
+                        <div style="font-size:20px;text-align:center">${konfig.emoji}</div>
+                        <div style="font-weight:bold;color:${konfig.renk}">${konfig.baslik}</div>
+                        <div style="color:#555;font-size:10px">OpenStreetMap verisi</div>
+                    </div>
+                `);
+
+            const marker = new mapboxgl.Marker({ element: el, anchor: 'bottom' })
+                .setLngLat([node.lon, node.lat])
+                .setPopup(popup)
+                .addTo(map);
+
+            osmMarkerlar.set(key, marker);
+        });
+
+        console.log(`OSM: ${data.elements.length} nokta yüklendi`);
+    } catch (e) {
+        console.log('OSM sorgu hatası:', e);
+    }
+}
+
+// Yakın OSM noktalarını sesli uyar
+function osmYakinlikKontrol(kullaniciLat, kullaniciLng) {
+    for (const [key, marker] of osmMarkerlar) {
+        const pos = marker.getLngLat();
+        const dLat = (kullaniciLat - pos.lat) * 111000;
+        const dLng = (kullaniciLng - pos.lng) * 111000 * Math.cos(kullaniciLat * Math.PI / 180);
+        const mesafe = Math.sqrt(dLat * dLat + dLng * dLng);
+
+        if (mesafe < 15 && !marker._uyarildi) {
+            marker._uyarildi = true;
+            // Marker tipini bul
+            const el = marker.getElement();
+            const baslikEl = el.querySelector('div div:last-child');
+            if (baslikEl) {
+                const baslik = baslikEl.textContent;
+                // TTS için Android'e gönder — harita üzerinden bilgi ver
+                const bar = document.getElementById('engel-bar');
+                bar.style.display = 'block';
+                bar.className = 'dikkat';
+                bar.textContent = `📍 ${baslik} — ${Math.round(mesafe)} metre`;
+                setTimeout(() => bar.style.display = 'none', 4000);
+            }
+            // 2 dakika sonra uyarıyı sıfırla (aynı noktadan tekrar geçince uyarsın)
+            setTimeout(() => { marker._uyarildi = false; }, 120000);
+        }
+    }
+}
+
+socket.on('canli_kamera', (data) => {
+    if (!kameraPanelAcik) return;
+    const canvas = document.getElementById('kamera-canvas');
+    const ctx = canvas.getContext('2d');
+    const img = new Image();
+    img.onload = () => {
+        ctx.drawImage(img, 0, 0, 320, 320);
+        (data.kutular || []).forEach(k => {
+            ctx.strokeStyle = k.tehlike ? '#ff3300' : '#00ff88';
+            ctx.strokeRect(k.x, k.y, k.w, k.h);
+        });
+    };
+    img.src = 'data:image/jpeg;base64,' + data.goruntu;
+});
+
+// Rota değişkenleri
+let hedefLat = null;
+let hedefLng = null;
+let hedefMarker = null;
+let rotaAktif = false;
+let rotaAdimlar = [];
+let mevcutAdimIndex = 0;
+let sonRotaKontrolZamani = 0;
+
+// Haritaya tıklayarak hedef seç
+map.on('click', (e) => {
+    if (rotaAktif) return;
+    hedefLat = e.lngLat.lat;
+    hedefLng = e.lngLat.lng;
+
+    if (hedefMarker) hedefMarker.remove();
+
+    const el = document.createElement('div');
+    el.style.cssText = `
+        font-size: 28px;
+        filter: drop-shadow(0 0 8px #ff3300);
+    `;
+    el.textContent = '📍';
+
+    hedefMarker = new mapboxgl.Marker({ element: el, anchor: 'bottom' })
+        .setLngLat([hedefLng, hedefLat])
+        .addTo(map);
+
+    document.getElementById('rota-input').value = `${hedefLat.toFixed(5)}, ${hedefLng.toFixed(5)}`;
+});
+
+async function adresdenKoordinat(adres) {
+    const url = `https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(adres)}.json?access_token=${mapboxgl.accessToken}&country=tr&language=tr`;
+    const resp = await fetch(url);
+    const data = await resp.json();
+    if (data.features && data.features.length > 0) {
+        const [lng, lat] = data.features[0].center;
+        return { lat, lng };
+    }
+    return null;
+}
+
+async function rotaBaslat() {
+    const input = document.getElementById('rota-input').value.trim();
+
+    // Koordinat mı yoksa adres mi?
+    if (input && !hedefLat) {
+        const koordinatlar = input.split(',');
+        if (koordinatlar.length === 2 && !isNaN(koordinatlar[0]) && !isNaN(koordinatlar[1])) {
+            hedefLat = parseFloat(koordinatlar[0]);
+            hedefLng = parseFloat(koordinatlar[1]);
+        } else {
+            // Adres araması yap
+            const koordinat = await adresdenKoordinat(input);
+            if (!koordinat) {
+                alert('Adres bulunamadı!');
+                return;
+            }
+            hedefLat = koordinat.lat;
+            hedefLng = koordinat.lng;
+        }
+    }
+
+    if (!hedefLat || !hedefLng) {
+        alert('Lütfen hedef seçin!');
+        return;
+    }
+
+    if (sonLat === 0 && sonLng === 0) {
+        alert('GPS konumu bekleniyor...');
+        return;
+    }
+
+    await rotaHesapla();
+}
+
+// Mevcut konum değişkeni (harita_guncelle'den gelecek)
+let sonLat = 0, sonLng = 0;
+
+async function rotaHesapla() {
+    const url = `https://api.mapbox.com/directions/v5/mapbox/walking/${sonLng},${sonLat};${hedefLng},${hedefLat}?steps=true&language=tr&voice_instructions=true&banner_instructions=true&access_token=${mapboxgl.accessToken}`;
+
+    try {
+        const resp = await fetch(url);
+        const data = await resp.json();
+
+        if (!data.routes || data.routes.length === 0) {
+            alert('Rota bulunamadı!');
+            return;
+        }
+
+        const rota = data.routes[0];
+        rotaAdimlar = rota.legs[0].steps;
+        mevcutAdimIndex = 0;
+        rotaAktif = true;
+
+        // Mesafe ve süre göster
+        const mesafeKm = (rota.distance / 1000).toFixed(1);
+        const sureDk = Math.round(rota.duration / 60);
+        document.getElementById('rota-mesafe').textContent = `${mesafeKm} km`;
+        document.getElementById('rota-sure').textContent = `~${sureDk} dk`;
+        document.getElementById('rota-bilgi').style.display = 'block';
+
+        // Haritada rota çizgisi çiz
+        rotaCizgisiGoster(rota.geometry);
+
+        // İlk adımı söyle
+        rotaAdimSoyле(0);
+
+    } catch (e) {
+        alert('Rota hesaplama hatası: ' + e.message);
+    }
+}
+
+function rotaCizgisiGoster(geometry) {
+    // Eski rotayı temizle
+    if (map.getLayer('rota-cizgi')) map.removeLayer('rota-cizgi');
+    if (map.getSource('rota')) map.removeSource('rota');
+
+    map.addSource('rota', {
+        type: 'geojson',
+        data: { type: 'Feature', geometry }
+    });
+
+    map.addLayer({
+        id: 'rota-cizgi',
+        type: 'line',
+        source: 'rota',
+        layout: { 'line-join': 'round', 'line-cap': 'round' },
+        paint: {
+            'line-color': '#00ff88',
+            'line-width': 5,
+            'line-opacity': 0.8,
+            'line-dasharray': [2, 1]
+        }
+    });
+}
+
+function rotaAdimSoyле(index) {
+    if (index >= rotaAdimlar.length) {
+        document.getElementById('rota-adim').textContent = '🎯 Hedefe ulaştınız!';
+        rotaAktif = false;
+        return;
+    }
+
+    const adim = rotaAdimlar[index];
+    const talimat = adimTurkcelestir(adim.maneuver.instruction || '');
+    const mesafe = adim.distance < 1000
+        ? `${Math.round(adim.distance)} metre`
+        : `${(adim.distance / 1000).toFixed(1)} kilometre`;
+
+    const metin = `${talimat} — ${mesafe}`;
+    document.getElementById('rota-adim').textContent = metin;
+
+    // TTS ile söyle
+    if (window.speechSynthesis) {
+        const utterance = new SpeechSynthesisUtterance(metin);
+        utterance.lang = 'tr-TR';
+        utterance.rate = 0.9;
+        window.speechSynthesis.speak(utterance);
+    }
+}
+
+function adimTurkcelestir(talimat) {
+    return talimat
+        .replace('Turn left', 'Sola dönün')
+        .replace('Turn right', 'Sağa dönün')
+        .replace('Continue straight', 'Düz devam edin')
+        .replace('Head', 'İlerleyin')
+        .replace('north', 'kuzeye')
+        .replace('south', 'güneye')
+        .replace('east', 'doğuya')
+        .replace('west', 'batıya')
+        .replace('Arrive at', 'Hedefinize ulaştınız')
+        .replace('on the left', 'solunuzda')
+        .replace('on the right', 'sağınızda');
+}
+
+function rotaAdimKontrol(lat, lng) {
+    if (!rotaAktif || rotaAdimlar.length === 0) return;
+    if (Date.now() - sonRotaKontrolZamani < 3000) return;
+    sonRotaKontrolZamani = Date.now();
+
+    if (mevcutAdimIndex >= rotaAdimlar.length) return;
+
+    const adim = rotaAdimlar[mevcutAdimIndex];
+    const hedefLoc = adim.maneuver.location;
+    const dLat = (lat - hedefLoc[1]) * 111000;
+    const dLng = (lng - hedefLoc[0]) * 111000 * Math.cos(lat * Math.PI / 180);
+    const mesafe = Math.sqrt(dLat * dLat + dLng * dLng);
+
+    // 20 metre yaklaşınca sonraki adıma geç
+    if (mesafe < 20) {
+        mevcutAdimIndex++;
+        rotaAdimSoyле(mevcutAdimIndex);
+    }
+}
+
+function rotaIptal() {
+    rotaAktif = false;
+    rotaAdimlar = [];
+    mevcutAdimIndex = 0;
+    hedefLat = null;
+    hedefLng = null;
+
+    if (hedefMarker) { hedefMarker.remove(); hedefMarker = null; }
+    if (map.getLayer('rota-cizgi')) map.removeLayer('rota-cizgi');
+    if (map.getSource('rota')) map.removeSource('rota');
+
+    document.getElementById('rota-input').value = '';
+    document.getElementById('rota-bilgi').style.display = 'none';
+    document.getElementById('rota-adim').textContent = '';
+}
+</script>
+</body>
+</html>

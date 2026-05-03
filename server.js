@@ -4,6 +4,10 @@ const https = require('https');
 const { Server } = require('socket.io');
 
 const app = express();
+
+// Web arayüzünü (Haritayı) herkese açmak için eklediğimiz satır:
+app.use(express.static(__dirname + '/public'));
+
 const server = http.createServer(app);
 const io = new Server(server, {
     cors: { origin: "*", methods: ["GET", "POST"] }
@@ -84,5 +88,5 @@ io.on('connection', (socket) => {
 
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, '0.0.0.0', () => {
-    console.log(`GÖZCÜ SUNUCU AKTİF: http://192.168.137.1:${PORT}`);
+    console.log(`GÖZCÜ SUNUCU AKTİF PORT: ${PORT}`);
 });
