@@ -5,7 +5,7 @@
     <title>Aero-Nav | Gözcü Komuta Merkezi</title>
     <script src="https://api.mapbox.com/mapbox-gl-js/v2.14.1/mapbox-gl.js"></script>
     <link href="https://api.mapbox.com/mapbox-gl-js/v2.14.1/mapbox-gl.css" rel="stylesheet" />
-    <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+    <script src="/socket.io/socket.io.js"></script>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body { background: #000; color: #0f0; font-family: 'Courier New', monospace; overflow: hidden; }
@@ -453,7 +453,7 @@ async function osmVeriCek(lat, lng) {
     sonOsmSorguZamani = suAn;
 
     try {
-        const resp = await fetch(`http://192.168.137.1:3000/osm-verisi?lat=${lat}&lng=${lng}&yari_cap=200`);
+        const resp = await fetch(`/osm-verisi?lat=${lat}&lng=${lng}&yari_cap=200`);
         const data = await resp.json();
 
         if (!data.elements) return;
