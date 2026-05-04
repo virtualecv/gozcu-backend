@@ -355,7 +355,7 @@ let kameraPanelAcik = false;
 function kameraPanelAc() { document.getElementById('kamera-panel').style.display = 'flex'; kameraPanelAcik = true; }
 function kameraPanelKapat() { document.getElementById('kamera-panel').style.display = 'none'; kameraPanelAcik = false; }
 
-// Socket bağlantısı - IP: 192.168.137.1
+// Socket bağlantısı
 const socket = io();
 
 socket.on('connect', () => {
@@ -654,26 +654,30 @@ async function rotaHesapla() {
     }
 }
 
+// Yenilenmiş, mavi animasyonlu rota çizgisi
 function rotaCizgisiGoster(geometry) {
-    // Eski rotayı temizle
     if (map.getLayer('rota-cizgi')) map.removeLayer('rota-cizgi');
+    if (map.getLayer('rota-cizgi-bg')) map.removeLayer('rota-cizgi-bg');
     if (map.getSource('rota')) map.removeSource('rota');
 
-    map.addSource('rota', {
-        type: 'geojson',
-        data: { type: 'Feature', geometry }
+    map.addSource('rota', { type: 'geojson', data: { type: 'Feature', geometry } });
+
+    // Arka plan — kalın beyaz
+    map.addLayer({
+        id: 'rota-cizgi-bg', type: 'line', source: 'rota',
+        layout: { 'line-join': 'round', 'line-cap': 'round' },
+        paint: { 'line-color': '#ffffff', 'line-width': 9, 'line-opacity': 0.3 }
     });
 
+    // Ön plan — mavi animasyonlu
     map.addLayer({
-        id: 'rota-cizgi',
-        type: 'line',
-        source: 'rota',
+        id: 'rota-cizgi', type: 'line', source: 'rota',
         layout: { 'line-join': 'round', 'line-cap': 'round' },
         paint: {
-            'line-color': '#00ff88',
-            'line-width': 5,
-            'line-opacity': 0.8,
-            'line-dasharray': [2, 1]
+            'line-color': '#0088ff',
+            'line-width': 6,
+            'line-opacity': 0.9,
+            'line-dasharray': [0, 2]
         }
     });
 }
@@ -747,12 +751,32 @@ function rotaIptal() {
 
     if (hedefMarker) { hedefMarker.remove(); hedefMarker = null; }
     if (map.getLayer('rota-cizgi')) map.removeLayer('rota-cizgi');
+    if (map.getLayer('rota-cizgi-bg')) map.removeLayer('rota-cizgi-bg');
     if (map.getSource('rota')) map.removeSource('rota');
 
     document.getElementById('rota-input').value = '';
     document.getElementById('rota-bilgi').style.display = 'none';
     document.getElementById('rota-adim').textContent = '';
 }
+
+// Android'den gelen sesli hedefi haritada işle
+socket.on('sesli_rota_istegi', async (data) => {
+    const hedef = data.hedef;
+    sonLat = data.lat;
+    sonLng = data.lng;
+
+    document.getElementById('rota-input').value = hedef;
+
+    // Geocoding ile koordinat bul
+    const koordinat = await adresdenKoordinat(hedef);
+    if (koordinat) {
+        hedefLat = koordinat.lat;
+        hedefLng = koordinat.lng;
+        await rotaHesapla();
+    } else {
+        console.log('Adres bulunamadı:', hedef);
+    }
+});
 </script>
 </body>
 </html>

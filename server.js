@@ -83,6 +83,12 @@ io.on('connection', (socket) => {
         socket.broadcast.emit('canli_kamera', data);
     });
 
+    // Android'den gelen sesli rota hedefini haritaya ilet
+    socket.on('sesli_rota', (data) => {
+        console.log('Sesli rota isteği:', data.hedef);
+        io.emit('sesli_rota_istegi', data);
+    });
+
     socket.on('disconnect', () => {
         console.log('Bağlantı kesildi:', socket.id);
     });
